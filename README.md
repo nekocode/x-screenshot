@@ -4,6 +4,8 @@
 
 A Chrome extension for capturing tweets from X (Twitter) with custom styles.
 
+![Cover](cover.png)
+
 ## Features
 
 - **Multi-select** - Select multiple tweets at once
