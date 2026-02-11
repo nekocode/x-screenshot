@@ -16,11 +16,13 @@ x-screenshot/
 ├── lib/
 │   ├── selector.ts         # 选择模式控制器 + eager capture
 │   ├── capture.ts          # 截图核心（分段截图 + 拼接）
+│   ├── stitch.ts           # 重叠检测 + 智能垂直拼接
 │   └── modal.ts            # 结果弹窗（下载/复制）
 ├── tests/                  # 单元测试
 │   ├── capture.test.ts
 │   ├── modal.test.ts
-│   └── selector.test.ts
+│   ├── selector.test.ts
+│   └── stitch.test.ts
 ├── wxt.config.ts           # WXT 配置
 ├── vitest.config.ts        # 测试配置
 ├── package.json
@@ -35,7 +37,8 @@ x-screenshot/
 | `background.ts` | 调用 Chrome captureVisibleTab API，返回截图 data URL |
 | `content.ts` | 消息路由，协调 selector → modal 流程 |
 | `selector.ts` | hover 高亮、click 选中、**选中时立即截图**、Done/Cancel 按钮 |
-| `capture.ts` | 注入 CSS 隐藏干扰元素、分段截图（超高元素）、垂直拼接 |
+| `capture.ts` | 注入 CSS 隐藏干扰元素、分段截图（超高元素）、调用 stitch 拼接 |
+| `stitch.ts` | Row Signature + SAD 重叠检测、去重垂直拼接 |
 | `modal.ts` | 展示结果图片，下载/复制到剪贴板 |
 
 ## 数据流
@@ -82,7 +85,25 @@ Twitter 使用虚拟列表（Virtual List），滚动时会回收 DOM 节点。�
 
 ### 分段截图（超高元素）
 
-当 tweet 高度超过视口时，分段滚动截图，最后垂直拼接。
+当 tweet 高度超过视口时，分段滚动截图，自动检测重叠后去重拼接。
+
+关键设计：
+- **零 PNG 往返** — 分段保持 Canvas 对象，直接传给 stitch，避免 toDataURL/loadImage 冗余编解码
+- **每次循环重测元素位置** — 适配虚拟列表的 DOM 重排
+- **rAF + settle** — 等待浏览器完成 paint 再截图
+- **MAX_SEGMENTS=20** — 防止虚拟列表异常导致无限循环
+
+#### 重叠检测算法（stitch.ts）
+
+```
+Phase 1: Row Signature 快速匹配
+  sig[row] = avg(R+G+B) → 每行一个浮点数指纹
+  从 maxOverlap 向下搜索, 找 90%+ 行匹配的候选 k
+
+Phase 2: Pixel SAD 精确验证
+  均匀采样 3~10 行（随重叠大小增长）做像素级 SAD
+  通过 → 返回 k; 不通过 → 继续搜索
+```
 
 ### 自定义 CSS（用户可配置）
 

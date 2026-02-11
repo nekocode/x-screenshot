@@ -27,6 +27,11 @@ const mockContext = {
   fillStyle: '',
   fillRect: vi.fn(),
   drawImage: vi.fn(),
+  getImageData: vi.fn().mockReturnValue({
+    data: new Uint8ClampedArray(100 * 100 * 4),
+    width: 100,
+    height: 100,
+  }),
 }
 HTMLCanvasElement.prototype.getContext = vi.fn().mockReturnValue(mockContext) as any
 HTMLCanvasElement.prototype.toDataURL = vi.fn().mockReturnValue('data:image/png;base64,croppedImage')

@@ -2,7 +2,7 @@
   "name": "x-screenshot",
   "description": "Chrome extension for capturing tweets with custom styles",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "wxt",

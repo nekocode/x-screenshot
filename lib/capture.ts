@@ -3,6 +3,7 @@
 // =============================================================================
 
 import { pauseSelectMode, resumeSelectMode } from './selector'
+import { stitchSegments } from './stitch'
 
 // CSS to inject before capture (minimal - only things that can't be detected dynamically)
 const BASE_CAPTURE_CSS = `
@@ -196,14 +197,20 @@ async function captureElement(el: Element): Promise<string> {
   }
 
   // Element is taller than viewport - capture in segments
-  const segments: HTMLImageElement[] = []
+  const MAX_SEGMENTS = 20
+  const segments: HTMLCanvasElement[] = []
   let capturedHeight = 0
 
-  while (capturedHeight < elHeight) {
-    // Calculate how much of the element we can see
-    const scrollTarget = elTop + capturedHeight
+  while (capturedHeight < elHeight && segments.length < MAX_SEGMENTS) {
+    // Re-measure element position each iteration (virtual list may reposition)
+    const currentRect = el.getBoundingClientRect()
+    const currentElTop = window.scrollY + currentRect.top
+
+    const scrollTarget = currentElTop + capturedHeight
     window.scrollTo({ top: scrollTarget, behavior: 'instant' })
-    await new Promise(r => setTimeout(r, 100))
+
+    // Wait for paint: rAF guarantees at least one frame, then short settle
+    await new Promise(r => requestAnimationFrame(() => setTimeout(r, 50)))
 
     // Get current visible rect of the element
     const rect = el.getBoundingClientRect()
@@ -227,7 +234,7 @@ async function captureElement(el: Element): Promise<string> {
     const dataUrl = await requestCapture()
     const segmentImg = await loadImage(dataUrl)
 
-    // Crop to the visible portion of the element
+    // Crop to the visible portion of the element — keep as Canvas (no PNG round-trip)
     const canvas = document.createElement('canvas')
     const ctx = canvas.getContext('2d')!
 
@@ -246,8 +253,7 @@ async function captureElement(el: Element): Promise<string> {
       canvasHeight
     )
 
-    const croppedImg = await loadImage(canvas.toDataURL('image/png'))
-    segments.push(croppedImg)
+    segments.push(canvas)
 
     capturedHeight += visibleHeight
   }
@@ -257,23 +263,9 @@ async function captureElement(el: Element): Promise<string> {
     throw new Error('captureElement: No segments captured')
   }
 
-  // Stitch segments vertically
-  const canvas = document.createElement('canvas')
-  const ctx = canvas.getContext('2d')!
-
-  const totalHeight = segments.reduce((sum, img) => sum + img.height, 0)
-  const maxWidth = Math.max(...segments.map(img => img.width))
-
-  canvas.width = maxWidth
-  canvas.height = totalHeight
-
-  let y = 0
-  for (const img of segments) {
-    ctx.drawImage(img, 0, y)
-    y += img.height
-  }
-
-  return canvas.toDataURL('image/png')
+  // Stitch segments with automatic overlap detection
+  const result = stitchSegments(segments)
+  return result.toDataURL('image/png')
 }
 
 /**
@@ -431,45 +423,15 @@ export async function stitchImages(dataUrls: string[]): Promise<string> {
  * @deprecated Use captureSingleElement + stitchImages for virtual list compatibility
  */
 export async function captureElements(elements: Element[]): Promise<string> {
-  // Inject capture styles to hide overlays and Grok button
   injectCaptureStyles()
-
-  // Wait a frame for styles to apply
   await new Promise(r => requestAnimationFrame(r))
 
   try {
-    const images: HTMLImageElement[] = []
-
-    // Capture each element
+    const dataUrls: string[] = []
     for (const el of elements) {
-      const dataUrl = await captureElement(el)
-      const img = await loadImage(dataUrl)
-      images.push(img)
+      dataUrls.push(await captureElement(el))
     }
-
-    // Stitch images vertically
-    const canvas = document.createElement('canvas')
-    const ctx = canvas.getContext('2d')!
-
-    const totalHeight = images.reduce((sum, img) => sum + img.height, 0)
-    const maxWidth = Math.max(...images.map(img => img.width))
-
-    canvas.width = maxWidth
-    canvas.height = totalHeight
-
-    // Fill background
-    ctx.fillStyle = '#000000'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-
-    // Draw images
-    let y = 0
-    for (const img of images) {
-      const x = (maxWidth - img.width) / 2
-      ctx.drawImage(img, x, y)
-      y += img.height
-    }
-
-    return canvas.toDataURL('image/png')
+    return stitchImages(dataUrls)
   } finally {
     removeCaptureStyles()
   }
